@@ -18,14 +18,14 @@ const CONFIG = {
 
   /* Texte du PV « Pas de réserves ». Variables : {controleur} {poseur} {commune} {projet} {adresse} {date} */
   texteSansReserve: [
-    "Je soussigné(e) {controleur}, en ma qualité de contrôleur, atteste avoir procédé, le {date}, à la réception des travaux d’installation de lampadaires solaires réalisés par l’entreprise {poseur} sur le chantier désigné ci-dessus.",
-    "À l’issue de cette visite de réception, aucune non-conformité ni aucune réserve n’a été relevée. Les travaux contrôlés sont conformes aux exigences attendues.",
+    "Je soussigné(e) {controleur}, en ma qualité de Chargé de projet - Éclairage public et efficacité énergétique pour Fonroche Lighting, atteste avoir procédé, le {date}, à la réception des travaux d’installation de lampadaires solaires réalisés par l’entreprise {poseur} sur le chantier désigné ci-dessus.",
+    "À l’issue de cette visite de chantier, aucune non-conformité n’a été relevée. Les travaux contrôlés sont conformes aux exigences attendues.",
     "En conséquence, le chantier est réceptionné sans réserve.",
-    "Fait à {commune}, le {date}, pour servir et valoir ce que de droit.",
+    "Fait à {commune}, le {date},",
   ],
 
   /* Google Drive : colle ici l'ID client OAuth (voir README). Laisser vide pour désactiver. */
-  googleClientId: "",
+  googleClientId: "185689198095-f4brt5lu6i1lmt676qf5uq6ima6oark3.apps.googleusercontent.com",
   driveRootFolder: "FL One Check – Photos",
   driveLinkInPdf: false, // true = ajoute dans le PDF un lien vers le dossier Drive (visible uniquement par les personnes ayant accès au dossier)
 };
