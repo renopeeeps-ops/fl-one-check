@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#E8801A">
+  <title>Réception chantier – Lampadaires solaires</title>
+  <link rel="icon" href="img/logo.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <img src="img/logo.png" alt="Logo entreprise" class="logo">
+    <div>
+      <h1>Réception de chantier</h1>
+      <p class="sub">Fiche des points non conformes</p>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. Infos chantier -->
+    <section class="card">
+      <h2>1) Infos chantier</h2>
+      <div class="grid">
+        <label>Projet / Affaire<input id="projet" type="text" autocomplete="off"></label>
+        <label>Commune<input id="commune" type="text" autocomplete="off"></label>
+        <label>Adresse / Zone<input id="adresse" type="text" autocomplete="off"></label>
+        <label>Date<input id="date" type="date"></label>
+
+        <label>Poseur
+          <select id="poseurSel"></select>
+        </label>
+        <label id="poseurNomWrap" hidden>Nom du poseur<input id="poseurNom" type="text" autocomplete="off"></label>
+        <label>Chef d’équipe<input id="chef" type="text" autocomplete="off"></label>
+
+        <label>Contrôleur
+          <select id="controleurSel"></select>
+        </label>
+        <label id="controleurNomWrap" hidden>Nom du contrôleur<input id="controleurNom" type="text" autocomplete="off"></label>
+      </div>
+    </section>
+
+    <!-- Mes fiches -->
+    <section class="card">
+      <details id="fiches" open>
+        <summary>📂 Mes fiches <span id="fichesCount" class="badge">0</span></summary>
+        <p class="hint">Conseil : duplique une fiche “type”, puis modifie.</p>
+        <ul id="fichesList" class="fiches-list"></ul>
+      </details>
+      <h3>Actions fiche</h3>
+      <div class="btns">
+        <button id="btnNew" type="button">➕ Nouvelle</button>
+        <button id="btnSave" type="button">💾 Sauver</button>
+        <button id="btnDup" type="button">📄 Dupliquer</button>
+        <button id="btnDel" type="button" class="danger">🗑️ Supprimer</button>
+        <button id="btnExportJson" type="button">⬇️ Export JSON</button>
+        <button id="btnImportJson" type="button">⬆️ Import JSON</button>
+        <input id="fileImport" type="file" accept="application/json,.json" hidden>
+      </div>
+    </section>
+
+    <!-- Points non conformes -->
+    <section class="card">
+      <h2>Points non conformes</h2>
+      <div class="btns">
+        <button id="btnAddPoint" type="button" class="primary">➕ Ajouter un point non conforme</button>
+        <button id="btnPdf" type="button" class="primary">🧾 Exporter PDF</button>
+        <button id="btnNoReserve" type="button" class="ok">✅ Pas de réserves</button>
+        <button id="btnShare" type="button">📤 Partager (Mail/WhatsApp)</button>
+        <button id="btnClear" type="button" class="danger">🧽 Vider la fiche (courante)</button>
+      </div>
+      <label id="driveBox" class="check" hidden>
+        <input id="driveOpt" type="checkbox" checked>
+        <span>☁️ Envoyer aussi les photos (haute résolution) sur mon Google Drive à l’export</span>
+      </label>
+      <p id="driveOff" class="hint" hidden>☁️ Envoi des photos sur Google Drive non activé (voir README, étape « Google Drive »).</p>
+      <div id="points"></div>
+    </section>
+
+    <!-- 2. Synthèse -->
+    <section class="card">
+      <h2>2) Synthèse</h2>
+      <div id="synthese" class="synthese"></div>
+    </section>
+
+    <!-- Signatures -->
+    <section class="card">
+      <h2>Signatures</h2>
+      <div class="sigs">
+        <div class="sig" data-key="controleur">
+          <h3>Contrôleur</h3>
+          <canvas></canvas>
+          <button type="button" class="clear">Effacer</button>
+        </div>
+        <div class="sig" data-key="entreprise">
+          <h3>Entreprise</h3>
+          <canvas></canvas>
+          <button type="button" class="clear">Effacer</button>
+        </div>
+        <div class="sig" data-key="client">
+          <h3>Client</h3>
+          <canvas></canvas>
+          <button type="button" class="clear">Effacer</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="busy" hidden><div class="busy-box">Génération du PDF…</div></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <script src="lib/jspdf.umd.min.js"></script>
+  <script src="js/logo-data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
