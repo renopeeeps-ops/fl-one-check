@@ -11,8 +11,8 @@ const CONFIG = {
   poseurs: ["ELECTROMONTAGE", "SPIE", "BOUYGUES", "INEO", "MAC²"],
   controleurs: ["Tony Diniz", "Quentin Gobbato", "Virgil Delbrel"],
   /* Intitulé du poste du contrôleur (le 1er est le choix par défaut). Un choix finissant par "..." se complète à la main. */
-  postes: ["Chargée de...", "Référent Technique"],
-  categories: ["Lanterne / LED", "Mât / Crosse", "Fondation / Massif", "Batterie", "Panneau solaire", "Câblage / Raccordement", "Aplomb / Orientation", "Propreté / Finitions", "Autre"],
+  postes: ["Chargé de projet - Éclairage public et efficacité énergétique", "Référent Technique", "Chargé d'affaires"],
+  categories: ["Lanterne / LED", "Mât / Crosse", "Fondation / Massif", "Batterie", "Panneau solaire", "Ensemble kit solaire", "Câblage / Raccordement", "Aplomb / Orientation", "Réfections",  "Propreté / Finitions", "Autre"],
   gravites: ["Mineure", "Majeure", "Bloquante"],
   photoMaxPx: 2048,      // taille max des photos conservées (côté le plus long) : c'est celle envoyée sur Drive
   photoQualite: 0.85,    // qualité JPEG
