@@ -10,6 +10,8 @@ const CONFIG = {
   titrePdfSans: "PV de réception – Sans réserve",
   poseurs: ["ELECTROMONTAGE", "SPIE", "BOUYGUES", "INEO", "MAC²"],
   controleurs: ["Tony Diniz", "Quentin Gobbato", "Virgil Delbrel"],
+  /* Intitulé du poste du contrôleur (le 1er est le choix par défaut). Un choix finissant par "..." se complète à la main. */
+  postes: ["Chargée de...", "Référent Technique"],
   categories: ["Lanterne / LED", "Mât / Crosse", "Fondation / Massif", "Batterie", "Panneau solaire", "Câblage / Raccordement", "Aplomb / Orientation", "Propreté / Finitions", "Autre"],
   gravites: ["Mineure", "Majeure", "Bloquante"],
   photoMaxPx: 2048,      // taille max des photos conservées (côté le plus long) : c'est celle envoyée sur Drive
@@ -18,14 +20,14 @@ const CONFIG = {
 
   /* Texte du PV « Pas de réserves ». Variables : {controleur} {poseur} {commune} {projet} {adresse} {date} */
   texteSansReserve: [
-    "Je soussigné(e) {controleur}, en ma qualité de Chargé de projet - Éclairage public et efficacité énergétique pour Fonroche Lighting, atteste avoir procédé, le {date}, à la réception des travaux d’installation de lampadaires solaires réalisés par l’entreprise {poseur} sur le chantier désigné ci-dessus.",
-    "À l’issue de cette visite de chantier, aucune non-conformité n’a été relevée. Les travaux contrôlés sont conformes aux exigences attendues.",
+    "Je soussigné(e) {controleur}, en ma qualité de {poste}, atteste avoir procédé, le {date}, à la réception des travaux d’installation de lampadaires solaires réalisés par l’entreprise {poseur} sur le chantier désigné ci-dessus.",
+    "À l’issue de cette visite de réception, aucune non-conformité ni aucune réserve n’a été relevée. Les travaux contrôlés sont conformes aux exigences attendues.",
     "En conséquence, le chantier est réceptionné sans réserve.",
-    "Fait à {commune}, le {date},",
+    "Fait à {commune}, le {date}, pour servir et valoir ce que de droit.",
   ],
 
   /* Google Drive : colle ici l'ID client OAuth (voir README). Laisser vide pour désactiver. */
-  googleClientId: "185689198095-f4brt5lu6i1lmt676qf5uq6ima6oark3.apps.googleusercontent.com",
+  googleClientId: "",
   driveRootFolder: "FL One Check – Photos",
   driveLinkInPdf: false, // true = ajoute dans le PDF un lien vers le dossier Drive (visible uniquement par les personnes ayant accès au dossier)
 };
@@ -86,13 +88,23 @@ function newSheet() {
   return {
     id: uid(), projet: "", commune: "", adresse: "", date: today(),
     poseurSel: "", poseurNom: "", chef: "", controleurSel: "", controleurNom: "",
+    posteSel: CONFIG.postes[0], posteTxt: "",
     points: [], signatures: { controleur: "", entreprise: "", client: "" },
     drive: null, // { folderId, folderUrl, files: { empreinte_photo: idFichierDrive } }
     updated: Date.now(),
   };
 }
 function newPoint() {
-  return { id: uid(), nb: "", obs: "", categorie: "", gravite: "", lat: "", lng: "", reprise: today(), photos: [] };
+  return { id: uid(), nb: "", obs: "", categorie: "", gravite: "", lat: "", lng: "", photos: [] };
+}
+/* Intitulé du poste du contrôleur : liste (CONFIG.postes) + « Autre… ». Les choix qui finissent par "..." se complètent à la main. */
+const posteNeedsText = (sel) => sel === "__autre" || /(\.\.\.|…)$/.test(sel || "");
+function posteLabel(s) {
+  const sel = s.posteSel === undefined ? CONFIG.postes[0] : s.posteSel;
+  const txt = (s.posteTxt || "").trim();
+  if (sel === "__autre") return txt;
+  if (/(\.\.\.|…)$/.test(sel)) return (sel.replace(/(\.\.\.|…)$/, "").trim() + " " + txt).trim();
+  return sel;
 }
 const poseurLabel = (s) => (s.poseurSel === "__autre" ? s.poseurNom : s.poseurSel) || "";
 const controleurLabel = (s) => (s.controleurSel === "__autre" ? s.controleurNom : s.controleurSel) || "";
@@ -161,8 +173,23 @@ function renderInfos() {
   fillSelect($("#controleurSel"), CONFIG.controleurs, cur.controleurSel);
   $("#poseurNomWrap").hidden = cur.poseurSel !== "__autre";
   $("#controleurNomWrap").hidden = cur.controleurSel !== "__autre";
+  /* Intitulé du poste (anciennes fiches sans ce champ : valeur par défaut) */
+  if (cur.posteSel === undefined) cur.posteSel = CONFIG.postes[0];
+  const ps = $("#posteSel");
+  ps.replaceChildren(...CONFIG.postes.map((x) => el("option", { value: x }, x)), el("option", { value: "__autre" }, "Autre…"));
+  ps.value = CONFIG.postes.includes(cur.posteSel) || cur.posteSel === "__autre" ? cur.posteSel : CONFIG.postes[0];
+  cur.posteSel = ps.value;
+  $("#posteTxt").value = cur.posteTxt || "";
+  updatePosteTxt();
+}
+function updatePosteTxt() {
+  const w = $("#posteTxtWrap");
+  w.hidden = !posteNeedsText(cur.posteSel);
+  $("#posteTxtLabel").textContent = cur.posteSel === "__autre" ? "Intitulé du poste" : "Compléter l’intitulé (ex. mission, projet…)";
 }
 function bindInfos() {
+  $("#posteSel").addEventListener("change", (e) => { cur.posteSel = e.target.value; updatePosteTxt(); touch(); });
+  $("#posteTxt").addEventListener("input", (e) => { cur.posteTxt = e.target.value; touch(); });
   for (const k of ["projet", "commune", "adresse", "date", "chef", "poseurNom", "controleurNom"]) {
     $("#" + k).addEventListener("input", (e) => { cur[k] = e.target.value; touch(); renderSynthese(); });
   }
@@ -237,7 +264,6 @@ function pointCard(p, i) {
   obs.addEventListener("input", upd("obs"));
   const cat = el("select", {}, ...opt(CONFIG.categories, p.categorie)); cat.addEventListener("change", upd("categorie"));
   const gra = el("select", {}, ...opt(CONFIG.gravites, p.gravite)); gra.addEventListener("change", upd("gravite"));
-  const rep = el("input", { type: "date", value: p.reprise }); rep.addEventListener("input", upd("reprise"));
 
   return el("article", { class: "point" },
     el("div", { class: "point-head" }, title,
@@ -249,7 +275,6 @@ function pointCard(p, i) {
       el("label", {}, "N° / Nom du point", nbInput),
       el("label", {}, "Catégorie", cat),
       el("label", {}, "Gravité", gra),
-      el("label", {}, "Date de reprise", rep),
       el("label", { class: "full" }, "Non-conformité / Observation", obs),
       el("label", { class: "full" }, "Localisation GPS (lat, long)", el("div", { class: "gps-row" }, latlng, gpsBtn)),
       el("div", { class: "full" }, el("div", { class: "btns" },
@@ -465,10 +490,13 @@ async function buildPdf(mode = "reserves", opts = {}) {
     line("Projet :", cur.projet, y + 18);
     if (cur.adresse) line("Adresse / Zone :", cur.adresse, y + 23);
     const yy = y + (cur.adresse ? 28 : 23);
-    let nx = line("Poseur :", poseurLabel(cur), yy);
-    if (cur.chef) nx = line("Chef d’équipe :", cur.chef, yy + 5);
-    line("Contrôleur :", controleurLabel(cur), cur.chef ? yy + 10 : yy, cur.chef ? x : nx + 4);
-    y += Math.max(hh, cur.chef ? 42 : 36) + 2;
+    let ly = yy;
+    line("Poseur :", poseurLabel(cur), ly);
+    if (cur.chef) { ly += 5; line("Chef d’équipe :", cur.chef, ly); }
+    ly += 5;
+    const poste = posteLabel(cur);
+    line("Contrôleur :", controleurLabel(cur) + (poste ? " – " + poste : ""), ly);
+    y += Math.max(hh, ly - y + 4) + 2;
     doc.setDrawColor(...INK).setLineWidth(0.5).line(M, y, PW - M, y);
     y += 6;
   };
@@ -498,7 +526,7 @@ async function buildPdf(mode = "reserves", opts = {}) {
     y += 24;
     const dots = "………………";
     const vars = {
-      controleur: controleurLabel(cur) || dots, poseur: poseurLabel(cur) || dots,
+      controleur: controleurLabel(cur) || dots, poste: posteLabel(cur).toLowerCase() || "contrôleur", poseur: poseurLabel(cur) || dots,
       commune: cur.commune || dots, projet: cur.projet || "", adresse: cur.adresse || "",
       date: frDate(cur.date) || dots,
     };
@@ -575,7 +603,7 @@ async function buildPdf(mode = "reserves", opts = {}) {
     x += cols[3].w;
     doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...GREY).text(gps, x + pad, y + 6);
     x += cols[4].w;
-    doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(...INK).text(p.reprise || "—", x + pad, y + 5);
+    /* Colonne « Date de reprise » volontairement vide : elle est complétée à la main par le poseur */
     y += rowH + 1.5;
   }
 
