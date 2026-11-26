@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#E8801A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Réception">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <title>Réception chantier – Lampadaires solaires</title>
   <link rel="icon" href="img/logo.png">
   <link rel="stylesheet" href="style.css">
@@ -18,6 +23,12 @@
   </header>
 
   <main>
+    <!-- Fichiers en attente d'envoi vers Google Drive (hors connexion) -->
+    <div id="outbox" class="outbox" role="status" hidden>
+      <span id="outboxTxt"></span>
+      <button id="outboxBtn" type="button" class="primary small">☁️ Envoyer maintenant</button>
+    </div>
+
     <!-- 1. Infos chantier -->
     <section class="card">
       <h2>1) Infos chantier</h2>
@@ -75,7 +86,7 @@
       </div>
       <label id="driveBox" class="check" hidden>
         <input id="driveOpt" type="checkbox" checked>
-        <span>☁️ Envoyer aussi les photos (haute résolution) sur mon Google Drive à l’export</span>
+        <span>☁️ Envoyer le PDF et les photos (haute résolution) sur Google Drive à l’export</span>
       </label>
       <p id="driveOff" class="hint" hidden>☁️ Envoi des photos sur Google Drive non activé (voir README, étape « Google Drive »).</p>
       <div id="points"></div>

@@ -11,8 +11,8 @@ const CONFIG = {
   poseurs: ["ELECTROMONTAGE", "SPIE", "BOUYGUES", "INEO", "MAC²"],
   controleurs: ["Tony Diniz", "Quentin Gobbato", "Virgil Delbrel"],
   /* Intitulé du poste du contrôleur (le 1er est le choix par défaut). Un choix finissant par "..." se complète à la main. */
-  postes: ["Chargé de projet - Éclairage public et efficacité énergétique", "Référent Technique", "Chargé d'affaires"],
-  categories: ["Lanterne / LED", "Mât / Crosse", "Fondation / Massif", "Batterie", "Panneau solaire", "Ensemble kit solaire", "Câblage / Raccordement", "Aplomb / Orientation", "Réfections",  "Propreté / Finitions", "Autre"],
+  postes: ["Chargé de projet - Éclairage public et efficacité énergétique", "Référent Technique"],
+  categories: ["Lanterne / LED", "Mât / Crosse", "Fondation / Massif", "Batterie", "Panneau solaire", "Câblage / Raccordement", "Aplomb / Orientation", "Propreté / Finitions", "Autre"],
   gravites: ["Mineure", "Majeure", "Bloquante"],
   photoMaxPx: 2048,      // taille max des photos conservées (côté le plus long) : c'est celle envoyée sur Drive
   photoQualite: 0.85,    // qualité JPEG
@@ -27,7 +27,7 @@ const CONFIG = {
   ],
 
   /* Google Drive : colle ici l'ID client OAuth (voir README). Laisser vide pour désactiver. */
-  googleClientId: "185689198095-f4brt5lu6i1lmt676qf5uq6ima6oark3.apps.googleusercontent.com",
+  googleClientId: "",
   driveRootFolder: "FL One Check – Photos",
   driveLinkInPdf: false, // true = ajoute dans le PDF un lien vers le dossier Drive (visible uniquement par les personnes ayant accès au dossier)
 };
@@ -62,24 +62,33 @@ function toast(msg) {
 const DB = (() => {
   let dbp;
   const open = () => dbp || (dbp = new Promise((res, rej) => {
-    const r = indexedDB.open("fl-one-check", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("sheets", { keyPath: "id" });
+    const r = indexedDB.open("fl-one-check", 2);
+    r.onupgradeneeded = () => {
+      const db = r.result;
+      if (!db.objectStoreNames.contains("sheets")) db.createObjectStore("sheets", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("outbox")) db.createObjectStore("outbox", { keyPath: "id" }); // fichiers en attente d'envoi vers Drive
+    };
     r.onsuccess = () => res(r.result);
     r.onerror = () => rej(r.error);
   }));
-  const tx = async (mode, fn) => {
+  const tx = async (store, mode, fn) => {
     const db = await open();
     return new Promise((res, rej) => {
-      const t = db.transaction("sheets", mode);
-      const out = fn(t.objectStore("sheets"));
+      const t = db.transaction(store, mode);
+      const out = fn(t.objectStore(store));
       t.oncomplete = () => res(out && out.result);
       t.onerror = () => rej(t.error);
+      t.onabort = () => rej(t.error || new Error("transaction annulée"));
     });
   };
   return {
-    all: () => tx("readonly", (s) => s.getAll()),
-    put: (v) => tx("readwrite", (s) => s.put(v)),
-    del: (id) => tx("readwrite", (s) => s.delete(id)),
+    all: () => tx("sheets", "readonly", (s) => s.getAll()),
+    get: (id) => tx("sheets", "readonly", (s) => s.get(id)),
+    put: (v) => tx("sheets", "readwrite", (s) => s.put(v)),
+    del: (id) => tx("sheets", "readwrite", (s) => s.delete(id)),
+    outAll: () => tx("outbox", "readonly", (s) => s.getAll()),
+    outPut: (v) => tx("outbox", "readwrite", (s) => s.put(v)),
+    outDel: (id) => tx("outbox", "readwrite", (s) => s.delete(id)),
   };
 })();
 
@@ -248,12 +257,26 @@ function pointCard(p, i) {
   const gpsBtn = el("button", { type: "button", onclick: () => {
     if (!navigator.geolocation) return toast("Géolocalisation non disponible");
     gpsBtn.disabled = true;
-    navigator.geolocation.getCurrentPosition((pos) => {
+    toast("Recherche de la position…");
+    const ok = (pos) => {
       p.lat = pos.coords.latitude.toFixed(6);
       p.lng = pos.coords.longitude.toFixed(6);
       latlng.value = `${p.lat}, ${p.lng}`;
       gpsBtn.disabled = false; touch(); renderSynthese(); toast("Position enregistrée 📍");
-    }, (err) => { gpsBtn.disabled = false; toast("Position refusée ou indisponible"); }, { enableHighAccuracy: true, timeout: 15000 });
+    };
+    const fail = (err) => {
+      gpsBtn.disabled = false;
+      console.warn("Géoloc", err && err.code, err && err.message);
+      const code = err && err.code;
+      toast(code === 1 ? "Position refusée : autorise la localisation pour Safari et pour ce site (voir réglages iPhone)"
+        : code === 3 ? "Position introuvable (délai dépassé) : sors à l’air libre et réessaie"
+        : "Position indisponible : vérifie que les Services de localisation sont activés");
+    };
+    /* 1er essai en précision réduite (rapide, fonctionne en intérieur), puis 2e essai en haute précision */
+    navigator.geolocation.getCurrentPosition(ok, (e1) => {
+      if (e1 && e1.code === 1) return fail(e1);
+      navigator.geolocation.getCurrentPosition(ok, fail, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
   } }, "📍 Ma position");
 
   const title = el("strong", {}, `Point n°${i + 1}${p.nb ? " – " + p.nb : ""}`);
@@ -652,10 +675,26 @@ async function withBusy(fn, label = "Génération du PDF…") {
   try { return await fn(); } finally { $("#busy").hidden = true; }
 }
 
-/* ---------- Google Drive (envoi des photos en haute résolution) ---------- */
-/* Portée « drive.file » : l'application ne voit et ne modifie QUE les fichiers qu'elle a elle-même créés. */
+/* ==========================================================================
+   Google Drive : photos haute résolution + PDF, avec file d'attente hors connexion
+   --------------------------------------------------------------------------
+   Principe : à chaque export, les photos pas encore envoyées et le PDF sont d'abord
+   MIS EN FILE D'ATTENTE sur l'appareil (IndexedDB, table « outbox »), puis envoyés.
+   Sans réseau, ils restent dans la file et partent dès que la connexion revient.
+   Portée « drive.file » : l'application ne voit et ne modifie QUE les fichiers qu'elle a créés.
+   ========================================================================== */
 const driveEnabled = () => !!CONFIG.googleClientId;
-let gisPromise = null, driveToken = null, driveTokenExp = 0;
+const driveWanted = () => driveEnabled() && $("#driveOpt").checked;
+let gisPromise = null, driveToken = null, driveTokenExp = 0, flushing = false, lastAuto = 0;
+let rootIdCache = null;
+const subFolderCache = {};
+
+try { // le jeton Google (valable ~1 h) survit à un rechargement de la page
+  const t = JSON.parse(sessionStorage.getItem("fl-drive-token") || "null");
+  if (t && t.exp > Date.now() + 60000) { driveToken = t.v; driveTokenExp = t.exp; }
+} catch {}
+const tokenValid = () => !!driveToken && Date.now() < driveTokenExp - 60000;
+function dropToken() { driveToken = null; driveTokenExp = 0; try { sessionStorage.removeItem("fl-drive-token"); } catch {} }
 
 function loadGis() {
   if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
@@ -668,10 +707,12 @@ function loadGis() {
   });
   return gisPromise;
 }
-async function getDriveToken() {
-  if (driveToken && Date.now() < driveTokenExp - 60000) return driveToken;
-  await loadGis();
-  return new Promise((resolve, reject) => {
+/* interactive = true : peut ouvrir la fenêtre Google (à appeler depuis un clic).
+   interactive = false : tentative silencieuse (retour du réseau) ; échoue sans bruit si Google demande une action. */
+function getDriveToken(interactive = true) {
+  if (tokenValid()) return Promise.resolve(driveToken);
+  if (!navigator.onLine) return Promise.reject(new Error("pas de connexion"));
+  return loadGis().then(() => new Promise((resolve, reject) => {
     const client = google.accounts.oauth2.initTokenClient({
       client_id: CONFIG.googleClientId,
       scope: "https://www.googleapis.com/auth/drive.file",
@@ -679,16 +720,17 @@ async function getDriveToken() {
         if (r.error) return reject(new Error(r.error_description || r.error));
         driveToken = r.access_token;
         driveTokenExp = Date.now() + (Number(r.expires_in) || 3600) * 1000;
+        try { sessionStorage.setItem("fl-drive-token", JSON.stringify({ v: driveToken, exp: driveTokenExp })); } catch {}
         resolve(driveToken);
       },
-      error_callback: (e) => reject(new Error(e && e.type === "popup_closed" ? "connexion Google annulée" : "fenêtre de connexion Google bloquée ou fermée")),
+      error_callback: (e) => reject(new Error(e && e.type === "popup_closed" ? "connexion Google annulée" : "connexion Google à confirmer")),
     });
-    client.requestAccessToken();
-  });
+    client.requestAccessToken({ prompt: interactive ? "" : "none" });
+  }));
 }
 async function driveApi(path, token, init = {}) {
   const r = await fetch("https://www.googleapis.com" + path, { ...init, headers: { Authorization: "Bearer " + token, ...(init.headers || {}) } });
-  if (!r.ok) { const e = new Error("erreur Google Drive " + r.status); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error("erreur Google Drive " + r.status); e.status = r.status; if (r.status === 401) dropToken(); throw e; }
   return r.json();
 }
 const qEsc = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
@@ -702,12 +744,27 @@ async function driveFolder(token, name, parentId) {
   });
   return made.id;
 }
-async function driveUpload(token, folderId, name, dataUrl) {
-  const blob = await (await fetch(dataUrl)).blob();
+async function ensureFolder(token, subName) {
+  if (!rootIdCache) rootIdCache = await driveFolder(token, CONFIG.driveRootFolder, null);
+  if (!subFolderCache[subName]) subFolderCache[subName] = await driveFolder(token, subName, rootIdCache);
+  const id = subFolderCache[subName];
+  return { id, url: "https://drive.google.com/drive/folders/" + id };
+}
+const resetFolderCache = () => { rootIdCache = null; for (const k of Object.keys(subFolderCache)) delete subFolderCache[k]; };
+
+async function driveCreate(token, folderId, name, blob, mime) {
   const b = "flone" + uid();
-  const meta = JSON.stringify({ name, parents: [folderId], mimeType: "image/jpeg" });
-  const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: image/jpeg\r\n\r\n`, blob, `\r\n--${b}--`]);
+  const meta = JSON.stringify({ name, parents: [folderId], mimeType: mime });
+  const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${b}\r\nContent-Type: ${mime}\r\n\r\n`, blob, `\r\n--${b}--`]);
   return driveApi("/upload/drive/v3/files?uploadType=multipart&fields=id", token, { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${b}` }, body });
+}
+/* Envoie un fichier ; si existingId est fourni (PDF déjà envoyé), le REMPLACE au lieu de créer un doublon. */
+async function driveSend(token, folderId, name, blob, mime, existingId) {
+  if (existingId) {
+    try { return await driveApi(`/upload/drive/v3/files/${existingId}?uploadType=media&fields=id`, token, { method: "PATCH", headers: { "Content-Type": mime }, body: blob }); }
+    catch (e) { if (e.status !== 404) throw e; /* fichier supprimé depuis : on le recrée */ }
+  }
+  return driveCreate(token, folderId, name, blob, mime);
 }
 function hashStr(s) { // empreinte courte pour savoir quelle photo est déjà sur Drive
   let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -717,96 +774,172 @@ function hashStr(s) { // empreinte courte pour savoir quelle photo est déjà su
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-async function uploadPhotosToDrive(token) {
-  const all = [];
-  cur.points.forEach((p, i) => p.photos.forEach((src, k) =>
-    all.push({ src, name: fileSafe(`Point ${String(i + 1).padStart(2, "0")}${p.nb ? " - " + p.nb : ""} - photo ${k + 1}`) + ".jpg" })));
-  const busy = $(".busy-box");
-  const run = async () => {
-    if (!cur.drive) cur.drive = { folderId: "", folderUrl: "", files: {} };
-    if (!cur.drive.folderId) {
-      const root = await driveFolder(token, CONFIG.driveRootFolder, null);
-      const sub = fileSafe([cur.date, cur.commune, cur.projet].filter(Boolean).join(" - ")) || "Chantier " + cur.id;
-      cur.drive.folderId = await driveFolder(token, sub, root);
-      cur.drive.folderUrl = "https://drive.google.com/drive/folders/" + cur.drive.folderId;
-    }
-    let sent = 0;
-    for (let i = 0; i < all.length; i++) {
-      const h = hashStr(all[i].src);
-      if (cur.drive.files[h]) continue; // déjà envoyée lors d'un export précédent
-      busy.textContent = `Envoi des photos sur Google Drive… ${i + 1}/${all.length}`;
-      const r = await driveUpload(token, cur.drive.folderId, all[i].name, all[i].src);
-      cur.drive.files[h] = r.id; sent++;
-    }
-    return sent;
-  };
-  let sent;
-  try { sent = await run(); }
-  catch (e) { // dossier supprimé depuis : on repart sur un dossier neuf
-    if (e.status === 404 && cur.drive) { cur.drive = null; sent = await run(); } else throw e;
-  }
+/* ---------- File d'attente (outbox) ---------- */
+const sheetRec = async (id) => (cur.id === id ? cur : await DB.get(id));
+
+function driveFolderName() {
+  if (cur.drive && cur.drive.folderName) return cur.drive.folderName; // reste stable même si on modifie la commune ensuite
+  return fileSafe([cur.date, cur.commune, cur.projet].filter(Boolean).join(" - ")) || "Chantier " + cur.id;
+}
+
+/* Met en file d'attente les photos pas encore envoyées + le PDF. Renvoie le nombre de fichiers ajoutés. */
+async function enqueueDrive(pdfBlob, pdfFileName) {
+  const folder = driveFolderName();
+  if (!cur.drive) cur.drive = { folderId: "", folderUrl: "", files: {} };
+  cur.drive.folderName = folder;
+  const items = [];
+  cur.points.forEach((p, i) => p.photos.forEach((src, k) => {
+    const key = hashStr(src);
+    if (cur.drive.files[key]) return; // déjà sur Drive
+    items.push({ kind: "photo", key, name: fileSafe(`Point ${String(i + 1).padStart(2, "0")}${p.nb ? " - " + p.nb : ""} - photo ${k + 1}`) + ".jpg", mime: "image/jpeg", data: src });
+  }));
+  if (pdfBlob) items.push({ kind: "pdf", key: "pdf:" + pdfFileName, name: pdfFileName, mime: "application/pdf", data: await pdfBlob.arrayBuffer() });
+  for (const it of items) await DB.outPut({ ...it, id: cur.id + "|" + it.key, sheetId: cur.id, folder, created: Date.now() }); // même id = remplace (dernier PDF gagne)
   touch();
-  await saveNow();
-  return { folderUrl: cur.drive.folderUrl, sent, total: all.length };
+  await refreshOutbox();
+  return items.length;
 }
 
-/* Ne lève jamais d'erreur : si Drive échoue, le PDF est quand même généré. */
-async function exportToDrive() {
-  if (!driveEnabled() || !$("#driveOpt").checked) return null;
-  if (!cur.points.some((p) => p.photos.length)) return null;
+async function recordUpload(it, fileId, folder) {
+  const rec = await sheetRec(it.sheetId);
+  if (!rec) return; // fiche supprimée entre-temps : le fichier est quand même sur Drive
+  if (!rec.drive) rec.drive = { folderId: "", folderUrl: "", files: {} };
+  rec.drive.files[it.key] = fileId;
+  rec.drive.folderId = folder.id; rec.drive.folderUrl = folder.url; rec.drive.folderName = it.folder;
+  if (rec === cur) touch(); else await DB.put(rec);
+}
+
+/* Envoie tout ce qui est en attente. Ne lève jamais d'erreur : en cas d'échec, les fichiers restent dans la file. */
+async function flushOutbox(token) {
+  if (flushing) return { sent: 0, left: -1, busy: true };
+  flushing = true;
+  let sent = 0, err = null;
   try {
-    const token = await getDriveToken(); // ouvre la fenêtre Google tout de suite (action de l'utilisateur)
-    const r = await withBusy(() => uploadPhotosToDrive(token), "Envoi des photos sur Google Drive…");
-    toast(r.sent ? `📁 ${r.sent} photo(s) envoyée(s) sur Google Drive` : "📁 Photos déjà présentes sur Google Drive");
-    return r;
+    const items = (await DB.outAll()).sort((a, b) => (a.kind === "pdf") - (b.kind === "pdf") || a.created - b.created); // photos d'abord, PDF en dernier
+    for (let n = 0; n < items.length; n++) {
+      const it = items[n];
+      setOutboxText(`☁️ Envoi sur Google Drive… ${n + 1}/${items.length}`);
+      const rec = await sheetRec(it.sheetId);
+      const known = rec && rec.drive && rec.drive.files[it.key];
+      if (known && it.kind === "photo") { await DB.outDel(it.id); continue; } // déjà envoyée
+      const blob = it.kind === "pdf" ? new Blob([it.data], { type: it.mime }) : await (await fetch(it.data)).blob();
+      let folder = await ensureFolder(token, it.folder), r;
+      try { r = await driveSend(token, folder.id, it.name, blob, it.mime, it.kind === "pdf" ? known : null); }
+      catch (e) { // dossier supprimé depuis : on le recrée et on réessaie une fois
+        if (e.status !== 404) throw e;
+        resetFolderCache(); folder = await ensureFolder(token, it.folder);
+        r = await driveSend(token, folder.id, it.name, blob, it.mime, null);
+      }
+      await recordUpload(it, r.id, folder);
+      await DB.outDel(it.id);
+      sent++;
+    }
   } catch (e) {
-    console.error(e);
-    toast("⚠️ Google Drive : " + (e.message || "échec") + " — PDF généré sans envoi");
-    return null;
+    err = e; console.error("Drive", e);
+  } finally {
+    flushing = false;
+    if (dirty) await saveNow();
+    try { sheets = await DB.all(); renderList(); } catch {}
+    await refreshOutbox();
+  }
+  const left = (await DB.outAll().catch(() => [])).length;
+  return { sent, left, err };
+}
+
+/* ---------- Bandeau « en attente d'envoi » ---------- */
+function setOutboxText(t) { $("#outboxTxt").textContent = t; }
+async function refreshOutbox() {
+  if (!driveEnabled()) { $("#outbox").hidden = true; return 0; }
+  let n = 0;
+  try { n = (await DB.outAll()).length; } catch {}
+  const box = $("#outbox");
+  box.hidden = n === 0;
+  if (n) {
+    const on = navigator.onLine;
+    setOutboxText(`${on ? "☁️" : "📴"} ${n} fichier${n > 1 ? "s" : ""} en attente d’envoi vers Google Drive${on ? "" : " (hors connexion : envoi automatique au retour du réseau)"}`);
+    $("#outboxBtn").disabled = !on;
+  }
+  return n;
+}
+function reportFlush(r) {
+  if (r.busy) return;
+  if (r.err && r.left) toast(`⚠️ Google Drive : envoi interrompu, ${r.left} fichier(s) restent en attente`);
+  else if (r.sent) toast(`📁 ${r.sent} fichier${r.sent > 1 ? "s" : ""} envoyé${r.sent > 1 ? "s" : ""} sur Google Drive`);
+}
+async function manualFlush() { // bouton « Envoyer maintenant » (clic = fenêtre Google autorisée)
+  try {
+    const token = await getDriveToken(true);
+    reportFlush(await withBusy(() => flushOutbox(token), "Envoi sur Google Drive…"));
+  } catch (e) { toast("⚠️ Google Drive : " + (e.message || "échec")); }
+}
+/* Envoi automatique : au démarrage, au retour du réseau, au retour sur l'application */
+async function autoFlush() {
+  if (!driveEnabled() || !navigator.onLine || flushing || Date.now() - lastAuto < 20000) return;
+  if (!(await refreshOutbox())) return;
+  lastAuto = Date.now();
+  try {
+    const token = await getDriveToken(false); // silencieux ; si Google demande une action, le bandeau reste avec son bouton
+    reportFlush(await flushOutbox(token));
+  } catch (e) { console.info("Envoi automatique différé :", e.message); }
+}
+
+/* ---------- Export (PDF avec réserves, PV sans réserve, partage) ---------- */
+async function exportFlow(mode, { share = false } = {}) {
+  try {
+    /* 1. Connexion Google tout de suite, tant que le clic est « frais » (impossible sans réseau : on met en attente) */
+    let token = null;
+    if (driveWanted() && navigator.onLine) {
+      try { token = await getDriveToken(true); }
+      catch (e) { toast("⚠️ Google Drive : " + (e.message || "échec") + " — envoi mis en attente"); }
+    }
+    /* 2. PDF (fonctionne sans réseau) */
+    const blob = await withBusy(() => buildPdf(mode, { driveUrl: cur.drive && cur.drive.folderUrl }));
+    const name = pdfName(mode);
+    /* 3. File d'attente persistante : les fichiers sont à l'abri même si l'envoi échoue */
+    let queued = 0;
+    if (driveWanted()) {
+      try { queued = await enqueueDrive(blob, name); }
+      catch (e) { console.error(e); toast("⚠️ Impossible de garder les fichiers pour Drive (stockage plein ?)"); }
+    }
+    /* 4. Copie locale / partage */
+    if (share) await shareFile(blob, name);
+    else download(blob, name);
+    /* 5. Envoi vers Drive */
+    if (queued) {
+      if (token) reportFlush(await withBusy(() => flushOutbox(token), "Envoi sur Google Drive…"));
+      else toast(navigator.onLine ? "☁️ Fichiers en attente : touche « Envoyer maintenant »" : "📴 Hors connexion : fichiers gardés sur l’appareil, envoi automatique au retour du réseau");
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    console.error(e); toast("⚠️ Erreur lors de la génération du PDF");
   }
 }
-
-async function actionPdf() {
-  try {
-    const drive = await exportToDrive();
-    const blob = await withBusy(() => buildPdf("reserves", { driveUrl: drive && drive.folderUrl }));
-    download(blob, pdfName());
-  } catch (e) { console.error(e); toast("⚠️ Erreur lors de la génération du PDF"); }
+async function shareFile(blob, name) {
+  const file = new File([blob], name, { type: "application/pdf" });
+  const text = `PV – Points non conformes\n${cur.commune || ""} ${cur.projet ? "– " + cur.projet : ""}\nDate : ${cur.date}\n${cur.points.length} point(s) non conforme(s).`;
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name, text }); return; }
+    catch (e) { if (e && e.name === "AbortError") return; /* geste expiré (iPhone) : repli ci-dessous */ }
+  }
+  /* Repli (ordinateur) : téléchargement du PDF puis ouverture d'un mail */
+  download(blob, name);
+  toast("PDF téléchargé : joins-le à ton mail ou à WhatsApp");
+  setTimeout(() => {
+    location.href = `mailto:?subject=${encodeURIComponent(name.replace(/\.pdf$/, ""))}&body=${encodeURIComponent(text + "\n\n(PDF en pièce jointe)")}`;
+  }, 900);
 }
+const actionPdf = () => exportFlow("reserves");
+const actionShare = () => exportFlow("reserves", { share: true });
 async function actionNoReserve() {
   if (cur.points.length) {
     alert("Cette fiche contient des points non conformes : un PV « sans réserve » ne peut pas en contenir.\n\nSupprime-les, ou utilise « Exporter PDF » pour le PV avec réserves.");
     return;
   }
   if (!cur.commune.trim() && !cur.projet.trim() && !confirm("Ni la commune ni le projet ne sont renseignés. Générer quand même le PV ?")) return;
-  try {
-    const blob = await withBusy(() => buildPdf("sans"));
-    download(blob, pdfName("sans"));
-  } catch (e) { console.error(e); toast("⚠️ Erreur lors de la génération du PDF"); }
-}
-async function actionShare() {
-  try {
-    const drive = await exportToDrive();
-    const blob = await withBusy(() => buildPdf("reserves", { driveUrl: drive && drive.folderUrl }));
-    const file = new File([blob], pdfName(), { type: "application/pdf" });
-    const text = `PV – Points non conformes\n${cur.commune || ""} ${cur.projet ? "– " + cur.projet : ""}\nDate : ${cur.date}\n${cur.points.length} point(s) non conforme(s).`;
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file], title: pdfName(), text });
-      return;
-    }
-    /* Repli (ordinateur) : téléchargement du PDF puis ouverture d'un mail */
-    download(blob, pdfName());
-    toast("PDF téléchargé : joins-le à ton mail ou à WhatsApp");
-    setTimeout(() => {
-      location.href = `mailto:?subject=${encodeURIComponent(pdfName().replace(/\.pdf$/, ""))}&body=${encodeURIComponent(text + "\n\n(PDF en pièce jointe)")}`;
-    }, 900);
-  } catch (e) {
-    if (e && e.name === "AbortError") return;
-    console.error(e); toast("⚠️ Partage impossible");
-  }
+  return exportFlow("sans");
 }
 
-/* Case « Envoyer les photos sur Google Drive » (mémorisée sur l'appareil) */
+/* Case « Envoyer sur Google Drive » (mémorisée sur l'appareil) */
 function initDriveOption() {
   const box = $("#driveBox");
   if (!driveEnabled()) { $("#driveOff").hidden = false; return; }
@@ -814,6 +947,16 @@ function initDriveOption() {
   const cb = $("#driveOpt");
   try { cb.checked = localStorage.getItem("fl-drive-opt") !== "0"; } catch { cb.checked = true; }
   cb.addEventListener("change", () => { try { localStorage.setItem("fl-drive-opt", cb.checked ? "1" : "0"); } catch {} });
+  $("#outboxBtn").addEventListener("click", manualFlush);
+}
+
+/* ---------- Réseau et installation hors connexion ---------- */
+function initOffline() {
+  window.addEventListener("online", () => { toast("🌐 Connexion rétablie"); refreshOutbox(); autoFlush(); });
+  window.addEventListener("offline", () => { toast("📴 Hors connexion : tout reste enregistré sur l’appareil"); refreshOutbox(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) autoFlush(); });
+  if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch((e) => console.warn("SW", e)));
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {} // demande au navigateur de ne pas effacer les données
 }
 
 /* ---------- Démarrage ---------- */
@@ -831,6 +974,7 @@ async function init() {
   $("#btnPdf").addEventListener("click", actionPdf);
   $("#btnNoReserve").addEventListener("click", actionNoReserve);
   initDriveOption();
+  initOffline();
   $("#btnShare").addEventListener("click", actionShare);
   $("#btnClear").addEventListener("click", actionClear);
   window.addEventListener("beforeunload", () => { if (dirty) saveNow(); });
@@ -840,5 +984,7 @@ async function init() {
     if (sheets.length) cur = clone([...sheets].sort((a, b) => b.updated - a.updated)[0]);
   } catch (e) { console.error(e); toast("⚠️ Stockage local indisponible : pense à exporter en JSON"); }
   renderAll();
+  refreshOutbox();
+  autoFlush();
 }
 init();

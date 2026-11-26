@@ -51,14 +51,31 @@ Il est refusé si la fiche contient des points non conformes.
 Le texte se modifie dans `js/app.js` → `CONFIG.texteSansReserve` (variables : `{controleur}`
 `{poseur}` `{commune}` `{projet}` `{adresse}` `{date}`).
 
-## Envoyer les photos sur Google Drive (à l'export)
+## Envoyer le PDF et les photos sur Google Drive (à l'export)
 
-À chaque « Exporter PDF » (ou « Partager »), si la case **☁️ Envoyer aussi les photos…** est cochée,
-les photos sont envoyées en haute résolution (2048 px) dans ton Drive :
+À chaque « Exporter PDF », « Pas de réserves » ou « Partager », si la case **☁️ Envoyer le PDF et les photos…**
+est cochée, le **PDF** et les **photos en haute résolution** (2048 px) vont dans le Drive du compte Google connecté :
 `Mon Drive / FL One Check – Photos / <date - commune - projet> /`
-(fichiers nommés `Point 01 - <nom> - photo 1.jpg`). Une photo déjà envoyée n'est pas renvoyée.
-Si Drive échoue (pas de réseau, connexion refusée…), le PDF est généré quand même.
-Le site n'a accès qu'aux fichiers qu'il a lui-même créés (portée `drive.file`) : jamais au reste de ton Drive.
+(`Point 01 - <nom> - photo 1.jpg`, `PV - <poseur> - <commune> (<projet>).pdf`).
+- Une photo déjà envoyée n'est pas renvoyée.
+- Si tu ré-exportes la même fiche, le PDF est **remplacé** (pas de doublon).
+- Le site n'a accès qu'aux fichiers qu'il a lui-même créés (portée `drive.file`) : jamais au reste de ton Drive.
+- Pour que tout le service retrouve les fichiers au même endroit, tout le monde se connecte avec le **même compte Google du service**
+  (ajoute-le comme « utilisateur de test » dans Google Cloud).
+
+## Mode hors connexion
+
+- **Installer l'appli** : sur iPhone, Safari → Partager → *Sur l'écran d'accueil* ; sur Android, menu Chrome → *Installer l'application*.
+  Une fois ouverte une première fois avec du réseau, elle s'ouvre ensuite **sans connexion**.
+- **Sans réseau**, tout fonctionne : saisie, photos, GPS, signatures, génération du PDF. Les fiches sont gardées sur l'appareil.
+- À l'export hors connexion, le PDF est enregistré/partagé comme d'habitude et les **photos + PDF sont mis en file d'attente**
+  (un bandeau orange indique « N fichiers en attente d'envoi »).
+- **Au retour du réseau**, l'envoi vers Drive repart tout seul quand l'appli est ouverte. Si Google demande une confirmation,
+  touche **« ☁️ Envoyer maintenant »** dans le bandeau (une seule fois).
+- Limites : un navigateur ne peut pas envoyer de fichiers quand l'appli est **fermée** (surtout sur iPhone) ; il faut la rouvrir.
+  Ne vide pas les données du site tant que le bandeau affiche des fichiers en attente. Sur iPhone, l'appli installée sur l'écran
+  d'accueil conserve ses données plus durablement qu'un onglet Safari.
+- Après une modification du code, change `VERSION` dans `sw.js` (`'v1'` → `'v2'`) pour que les téléphones rechargent les fichiers.
 
 ### Configuration unique (≈ 10 min) — nécessaire car l'accès Drive passe par TON projet Google
 
