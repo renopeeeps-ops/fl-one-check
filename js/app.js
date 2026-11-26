@@ -27,8 +27,8 @@ const CONFIG = {
   ],
 
   /* Google Drive : colle ici l'ID client OAuth (voir README). Laisser vide pour désactiver. */
-  googleClientId: "",
-  driveRootFolder: "FL One Check – Photos",
+  googleClientId: "http://185689198095-f4brt5lu6i1lmt676qf5uq6ima6oark3.apps.googleusercontent.com/",
+  driveRootFolder: "Réceptions de chantier – PDF/Photos",
   driveLinkInPdf: false, // true = ajoute dans le PDF un lien vers le dossier Drive (visible uniquement par les personnes ayant accès au dossier)
 };
 
