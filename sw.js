@@ -1,7 +1,7 @@
 /* Réception chantier – service worker : l'application s'ouvre sans connexion.
    Réseau d'abord (toujours la dernière version quand il y a du réseau), copie locale en secours.
    Pour forcer la mise à jour du cache après une modification, change VERSION. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'fl-one-check-' + VERSION;
 const FILES = [
   './', 'index.html', 'style.css', 'manifest.json',
